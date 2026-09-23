@@ -29,9 +29,20 @@ Write-Host "== 0. Python 확인 ==" -ForegroundColor Cyan
 # Python Launcher(py.exe)로 3.13→3.10 순서로 맞는 버전을 자동으로 찾는다
 # — 여러 Python 버전이 공존해도(예: 3.14 기본 + 3.12 추가 설치) 동작한다.
 function Test-VersionInRange($exe, $arg) {
-    if ($arg) { & $exe $arg -c "import sys; exit(0 if (3,10) <= sys.version_info[:2] <= (3,13) else 1)" 2>$null }
-    else { & $exe -c "import sys; exit(0 if (3,10) <= sys.version_info[:2] <= (3,13) else 1)" 2>$null }
-    return ($LASTEXITCODE -eq 0)
+    # Windows는 실제 Python이 없어도 PATH에 "설치 안내용" python.exe 스텁
+    # (App Execution Alias, %LOCALAPPDATA%\Microsoft\WindowsApps 아래)을
+    # 항상 끼워 둔다. 이걸 호출하면 정상적인 종료 코드 대신 PowerShell이
+    # NativeCommandError/RemoteException을 던지는 경우가 있어(실사용자
+    # 테스트에서 관리자 권한 PowerShell 창에서 재현·확인함), $LASTEXITCODE만
+    # 보면 스크립트 전체가 $ErrorActionPreference=Stop 때문에 죽는다.
+    # try/catch로 어떤 실패든 "이 인터프리터는 못 쓴다(false)"로만 처리한다.
+    try {
+        if ($arg) { & $exe $arg -c "import sys; exit(0 if (3,10) <= sys.version_info[:2] <= (3,13) else 1)" 1>$null 2>$null }
+        else { & $exe -c "import sys; exit(0 if (3,10) <= sys.version_info[:2] <= (3,13) else 1)" 1>$null 2>$null }
+        return ($LASTEXITCODE -eq 0)
+    } catch {
+        return $false
+    }
 }
 
 $PyExe = $null
