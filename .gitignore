@@ -1,0 +1,33 @@
+# 런타임 생성 데이터 (인덱싱 결과물 — 커밋하지 않는다)
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/indexing_log.json
+data/errors.jsonl
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# 가상환경
+.venv/
+venv/
+build_venv/
+
+# PyInstaller 산출물
+packaging/build/
+packaging/dist/
+*.spec.bak
+
+# 에디터
+.vscode/
+.idea/
+packaging/bundled_bin/*
+!packaging/bundled_bin/.gitkeep

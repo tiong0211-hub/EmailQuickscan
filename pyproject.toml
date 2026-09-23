@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "emailquickscan"
+version = "0.1.0"
+description = "사내망 Windows PC에서 Outlook 없이 동작하는 PST 메일 검색 엔진"
+requires-python = ">=3.10"
+readme = "README.md"
+
+# 런타임은 표준 라이브러리만으로도 동작한다(사내망 pip 설치 불가 전제).
+# 아래는 "있으면 쓰는" 선택 가속기다 — 개발 환경에서만 설치하고, 배포는
+# packaging/build_windows.ps1이 실행 파일에 번들한다.
+[project.optional-dependencies]
+accel = [
+    "libpff-python; sys_platform != 'win32'",
+    # Windows는 libpff-python이 아니라 이 사전 빌드 wheel을 쓴다(같은
+    # libpff 20231205을 Windows용으로 미리 컴파일해 올린 win_amd64 wheel,
+    # cp310~cp313 지원). MSVC 컴파일이 전혀 필요 없고, 설치되는 모듈명도
+    # 똑같이 `pypff`라 코드는 그대로다 — packaging/BUILD.md 참조.
+    "libpff-python-windows; sys_platform == 'win32'",
+    "extract-msg",
+    "PyYAML",
+    "chardet",
+    "rich",
+]
+dev = [
+    "pytest>=8",
+    "ruff",
+    "mypy",
+    "pyinstaller",
+]
+
+[project.scripts]
+pst-search = "pst_engine.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+
+[tool.ruff.lint]
+# 실질적인 버그를 잡는 규칙 위주로 고른다(오류/미사용/import 정렬/최신
+# 문법/흔한 버그 패턴). bandit(S)·예외 스타일(TRY)·과도한 단순화 제안
+# (SIM) 같은 opinionated 룰셋은 이 프로젝트의 "외부 라이브러리 경계에서
+# 넓게 예외를 잡는다"는 의도적 설계(CLAUDE.md 규칙 5)와 자주 충돌해
+# 제외했다.
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
