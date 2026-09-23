@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from pst_engine import config as config_mod
-from pst_engine.config import Config, _default_yaml_path, load_config, parse_yaml_subset
+from pst_engine.config import Config, _app_base_dir, _default_yaml_path, load_config, parse_yaml_subset
 
 _REAL_YAML = (Path(__file__).resolve().parent.parent / "config" / "default.yaml").read_text(encoding="utf-8")
 
@@ -129,3 +129,41 @@ def test_default_yaml_path_frozen_falls_back_to_bundled_meipass(monkeypatch, tmp
 
     path = _default_yaml_path()
     assert path == meipass / "config" / "default.yaml"
+
+
+def test_db_paths_are_anchored_to_app_base_dir_not_cwd(monkeypatch, tmp_path):
+    """data/mail_index.db 같은 상대 경로는 실행 시점의 현재 작업
+    디렉터리가 아니라 exe(또는 저장소 루트) 기준으로 고정돼야 한다 —
+    안 그러면 바로가기로 실행할 때마다 색인 결과가 다른 곳에 흩어진다.
+    """
+    exe_dir = tmp_path / "dist"
+    exe_dir.mkdir()
+    fake_exe = exe_dir / "EmailQuickscan.exe"
+    fake_exe.write_bytes(b"")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(fake_exe), raising=False)
+
+    # CWD를 exe 폴더와 전혀 다른 곳으로 바꿔도 결과가 같아야 한다.
+    unrelated_cwd = tmp_path / "somewhere_else"
+    unrelated_cwd.mkdir()
+    monkeypatch.chdir(unrelated_cwd)
+
+    cfg = load_config(exe_dir / "config" / "default.yaml")  # 존재하지 않아도 기본값 사용
+    assert cfg.db_path == str(exe_dir / "data" / "mail_index.db")
+    assert cfg.state_path == str(exe_dir / "data" / "indexing_log.json")
+    assert cfg.errors_path == str(exe_dir / "data" / "errors.jsonl")
+
+
+def test_absolute_path_override_is_not_re_anchored(tmp_path):
+    """paths.db 등을 절대 경로로 직접 지정하면 base_dir을 무시하고
+    그대로 써야 한다."""
+    custom_db = tmp_path / "custom" / "my.db"
+    cfg_file = tmp_path / "cfg.yaml"
+    cfg_file.write_text(f"paths:\n  db: \"{custom_db.as_posix()}\"\n", encoding="utf-8")
+    cfg = load_config(cfg_file)
+    assert cfg.db_path == str(custom_db)
+
+
+def test_app_base_dir_dev_mode_is_repo_root(monkeypatch):
+    monkeypatch.delattr(sys, "frozen", raising=False)
+    assert _app_base_dir() == Path(config_mod.__file__).resolve().parent.parent.parent

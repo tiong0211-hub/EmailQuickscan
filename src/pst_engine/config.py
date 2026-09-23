@@ -52,6 +52,28 @@ def _default_yaml_path() -> Path:
 _DEFAULT_YAML_PATH = _default_yaml_path()
 
 
+def _app_base_dir() -> Path:
+    """상대 경로로 지정된 DB/상태/로그 경로(``data/mail_index.db`` 등)를
+    고정할 기준 디렉터리.
+
+    ``sys.frozen``이면 **exe가 놓인 폴더**, 아니면 저장소 루트다. 이게
+    없으면 ``data/`` 같은 상대 경로가 "프로그램을 실행한 시점의 현재
+    작업 디렉터리" 기준으로 풀리는데, 바탕화면 바로가기나 다른 폴더에서
+    실행하면 매번 다른 곳에 ``data`` 폴더가 생겨 색인 결과가 흩어지는
+    문제가 생긴다 — 같은 원리로 ``_default_yaml_path()``도 exe 폴더를
+    기준으로 삼는다.
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent.parent.parent
+
+
+def _anchor_path(raw_value: str, base: Path) -> str:
+    """이미 절대 경로면 그대로, 상대 경로면 ``base`` 기준으로 고정한다."""
+    p = Path(raw_value)
+    return str(p if p.is_absolute() else base / p)
+
+
 # ---------------------------------------------------------------------------
 # 표준 라이브러리 전용 최소 YAML 서브셋 파서 (PyYAML 미번들 시 폴백)
 # ---------------------------------------------------------------------------
@@ -254,6 +276,8 @@ def load_config(path: str | Path | None = None) -> Config:
     backoff = _get(raw, "indexing", "retry", "backoff_seconds")
     backoff_tuple = tuple(float(x) for x in backoff) if isinstance(backoff, list) else (0.5, 1.0, 2.0)
 
+    base_dir = _app_base_dir()
+
     return Config(
         batch_size=int(_get(raw, "indexing", "batch_size", default=1000)),
         workers=int(_get(raw, "indexing", "workers", default=0)),
@@ -266,8 +290,8 @@ def load_config(path: str | Path | None = None) -> Config:
         snippet_len=int(_get(raw, "search", "snippet_len", default=300)),
         strip_quoted_replies=bool(_get(raw, "search", "strip_quoted_replies", default=True)),
         max_raw_bytes=int(_get(raw, "encoding", "max_raw_bytes", default=256 * 1024)),
-        db_path=str(_get(raw, "paths", "db", default="data/mail_index.db")),
-        state_path=str(_get(raw, "paths", "state", default="data/indexing_log.json")),
-        errors_path=str(_get(raw, "paths", "errors", default="data/errors.jsonl")),
+        db_path=_anchor_path(str(_get(raw, "paths", "db", default="data/mail_index.db")), base_dir),
+        state_path=_anchor_path(str(_get(raw, "paths", "state", default="data/indexing_log.json")), base_dir),
+        errors_path=_anchor_path(str(_get(raw, "paths", "errors", default="data/errors.jsonl")), base_dir),
         raw=raw,
     )
