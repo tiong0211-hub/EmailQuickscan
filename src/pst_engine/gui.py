@@ -88,14 +88,17 @@ class EmailQuickscanApp:
         sort_combo.pack(side=tk.LEFT, padx=4)
         sort_combo.bind("<<ComboboxSelected>>", self._on_query_changed)
 
-        # 폴더 필터: 검색창에 folder:/in:/폴더: 문법을 직접 타이핑하지
-        # 않아도, 인덱싱된 폴더 목록에서 골라 같은 부분일치 검색을 쓸 수
-        # 있게 한다(search.py의 기존 LIKE 로직을 그대로 재사용 — 새 필터
-        # 방식을 만들지 않는다). 값은 _refresh_folder_list()가 채운다.
-        self.folder_var = tk.StringVar(value="")
-        self.folder_combo = ttk.Combobox(top, textvariable=self.folder_var, values=[""], width=22, state="readonly")
-        self.folder_combo.pack(side=tk.LEFT, padx=4)
-        self.folder_combo.bind("<<ComboboxSelected>>", self._on_query_changed)
+        # 폴더 필터: 인덱싱된 폴더 목록에서 여러 개를 동시에 체크할 수
+        # 있다(드롭다운 + 체크박스 목록). 검색엔진에는 여러 폴더를 OR로
+        # 묶는 기능이 없으므로(SearchHit.folder_path만 이미 있음) 새 SQL
+        # 로직을 만들지 않고, GUI에서 넉넉히 받아온 결과를 Python에서
+        # folder_path 소속 여부로 후필터한다 — _run_search() 참조.
+        # 값/체크 상태는 _refresh_folder_list()가 채운다.
+        self.folder_vars: dict[str, tk.BooleanVar] = {}
+        self.folder_menu_button = ttk.Menubutton(top, text="(전체 폴더)", width=20)
+        self.folder_menu = tk.Menu(self.folder_menu_button, tearoff=False)
+        self.folder_menu_button["menu"] = self.folder_menu
+        self.folder_menu_button.pack(side=tk.LEFT, padx=4)
 
         self.whole_word_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(top, text="단어 단위", variable=self.whole_word_var, command=self._on_query_changed).pack(
@@ -147,18 +150,47 @@ class EmailQuickscanApp:
         self._current_full_by_id: dict[str, dict] = {}
 
     def _refresh_folder_list(self) -> None:
-        # 첫 항목은 빈 문자열("전체 폴더" = 필터 없음). DB가 아직 없거나
-        # 비어 있을 수 있으므로 조회 실패는 조용히 무시한다(드롭다운이
-        # 비어 있는 채로 남을 뿐 검색 자체는 영향받지 않는다).
-        folders = [""]
+        # 메뉴를 통째로 다시 그린다. DB가 아직 없거나 비어 있을 수 있으므로
+        # 조회 실패는 조용히 무시한다(메뉴가 비어 있는 채로 남을 뿐 검색
+        # 자체는 영향받지 않는다). 재인덱싱 등으로 다시 호출돼도 기존에
+        # 체크돼 있던 폴더의 선택 상태는 같은 이름의 BooleanVar를 재사용해
+        # 보존한다.
+        folders: list[str] = []
         if self._search_engine is not None:
             try:
-                folders += self._search_engine.list_folders()
+                folders = self._search_engine.list_folders()
             except Exception:
                 pass
-        self.folder_combo["values"] = folders
-        if self.folder_var.get() not in folders:
-            self.folder_var.set("")
+
+        self.folder_menu.delete(0, tk.END)
+        old_vars = self.folder_vars
+        self.folder_vars = {}
+        self.folder_menu.add_command(label="전체 해제", command=self._clear_folder_selection)
+        self.folder_menu.add_separator()
+        for folder in folders:
+            var = old_vars.get(folder, tk.BooleanVar(value=False))
+            self.folder_vars[folder] = var
+            self.folder_menu.add_checkbutton(label=folder, variable=var, command=self._on_folder_menu_changed)
+        self._update_folder_button_label()
+
+    def _clear_folder_selection(self) -> None:
+        for var in self.folder_vars.values():
+            var.set(False)
+        self._on_folder_menu_changed()
+
+    def _on_folder_menu_changed(self, _event: object = None) -> None:
+        self._update_folder_button_label()
+        self._on_query_changed()
+
+    def _update_folder_button_label(self) -> None:
+        selected = [f for f, v in self.folder_vars.items() if v.get()]
+        if not selected:
+            label = "(전체 폴더)"
+        elif len(selected) == 1:
+            label = selected[0]
+        else:
+            label = f"{len(selected)}개 폴더 선택됨"
+        self.folder_menu_button.config(text=label)
 
     def _on_query_changed(self, _event: object = None) -> None:
         if self._debounce_job is not None:
@@ -173,20 +205,23 @@ class EmailQuickscanApp:
             return
 
         query = self.query_var.get()
-        folder = self.folder_var.get()
-        if folder:
-            # cli.py의 _compose_query와 동일한 따옴표 규칙 — 검색창에
-            # 보이는 자유 텍스트 자체는 건드리지 않고, 폴더 필터만 검색
-            # 시점에 별도로 합성한다(기존 folder: 부분일치 로직 재사용).
-            quoted = f'"{folder}"' if " " in folder else folder
-            query = f"{query} folder:{quoted}".strip()
+        selected_folders = {f for f, v in self.folder_vars.items() if v.get()}
+        # 검색엔진에는 폴더를 OR로 묶는 SQL 경로가 없다(폴더 조건은 단일
+        # LIKE AND절뿐). 그래서 폴더를 걸러야 할 때는 더 넉넉히 받아와
+        # SearchHit.folder_path 기준으로 Python에서 후필터한다 — 완전한
+        # 전수 스캔은 아니고 "상위 500건 중에서" 거르는 근사치다(이
+        # 프로젝트가 bm25 관련도 정렬에도 쓰는 것과 같은 근사 철학).
+        limit = 500 if selected_folders else 50
         try:
             result = self._search_engine.search(
-                query, limit=50, sort=self.sort_var.get(), whole_word=self.whole_word_var.get()
+                query, limit=limit, sort=self.sort_var.get(), whole_word=self.whole_word_var.get()
             )
         except Exception as exc:
             self.status_var.set(f"검색 오류: {exc}")
             return
+
+        if selected_folders:
+            result.hits = [h for h in result.hits if h.folder_path in selected_folders][:50]
 
         self._last_result = result
         self._populate_results(result)
