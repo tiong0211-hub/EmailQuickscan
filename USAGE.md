@@ -29,10 +29,35 @@ exe 하나에 모든 게 들어있다(Python, SQLite, PST 파서, GUI). 사내�
 
 ### 1-1. 빌드 (인터넷 되는 PC, 사내망과 분리된 별도 PC)
 
+`build_windows.ps1`은 **PowerShell 전용 스크립트**다. 아래 순서대로
+**PowerShell 창**(명령 프롬프트/cmd.exe 아님 — 프롬프트가 `PS C:\...>`
+로 시작하는지 확인)에서 실행한다.
+
+1. 시작 메뉴에서 `PowerShell` 검색 → **Windows PowerShell** 실행
+   (관리자 권한 불필요)
+2. 아래 명령을 순서대로 입력:
+
 ```powershell
 git clone <이 저장소 주소>
 cd EmailQuickscan
 .\packaging\build_windows.ps1
+```
+
+만약 `.\packaging\build_windows.ps1` 실행 시 "이 시스템에서 스크립트를
+실행할 수 없으므로..." 같은 빨간 오류가 뜨면, 조직 정책이 PowerShell
+스크립트 실행을 기본 차단하고 있는 것이다. 같은 창에서 아래를 먼저
+실행한 뒤 다시 시도한다(이 PowerShell 창에만 적용되며 시스템 전체
+설정은 바꾸지 않는다):
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+```
+
+**명령 프롬프트(cmd.exe)만 열려 있고 PowerShell 창을 새로 띄우기
+어렵다면**, cmd.exe 안에서도 아래처럼 실행할 수 있다:
+
+```
+powershell -ExecutionPolicy Bypass -File packaging\build_windows.ps1
 ```
 
 Visual Studio나 별도 컴파일러 설치가 필요 없다(자세한 이유는
