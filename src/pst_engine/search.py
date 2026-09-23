@@ -74,7 +74,11 @@ class OrPair:
 class ParsedQuery:
     clauses: list[Term | OrPair] = field(default_factory=list)
     has_attachment: bool | None = None
-    folder: str | None = None
+    # folder:는 여러 번 나올 수 있다(예: "folder:법무 OR folder:영업") — 전부
+    # 누적하고 SQL에서 OR로 묶는다(GUI의 다중 폴더 체크박스 선택과 동일한
+    # 합집합 의미론). 과거엔 str 단일값이라 두 번째 folder:가 첫 번째를
+    # 경고 없이 덮어써 버리는 버그가 있었다(실사용자가 발견).
+    folder: list[str] = field(default_factory=list)
     file_substr: str | None = None
     date_after: int | None = None
     date_before: int | None = None
@@ -156,7 +160,7 @@ def parse_query(raw: str) -> ParsedQuery:
             elif tfield.lower() == "has" and text.strip().lower() in ("attachment", "attachments", "yes", "true"):
                 q.has_attachment = True
             elif canonical == "folder":
-                q.folder = text
+                q.folder.append(text)
             elif canonical == "file":
                 q.file_substr = text
             elif canonical == "date":
@@ -200,6 +204,15 @@ def parse_query(raw: str) -> ParsedQuery:
             pending_negate = False
 
         if clause is None:
+            # folder:/hasattachment:/date:/size: 등은 Term을 만들지 않고
+            # 여기서 바로 continue한다 — 그런데 그 직전에 "OR"가 있었다면
+            # pending_or를 여기서 리셋하지 않으면 다음에 나오는 무관한 텀과
+            # 잘못 OR로 묶이는 버그가 생긴다(실제로 있었던 버그: "A OR
+            # folder:X B"를 치면 folder:X를 건너뛰고 A와 B가 엉뚱하게
+            # OR로 묶였다). Term 경로의 경고 문구를 그대로 재사용한다.
+            if pending_or:
+                q.warnings.append("OR 앞뒤가 비교 가능한 단일 텀이 아니어서 AND로 처리했습니다")
+                pending_or = False
             continue
 
         prev_is_or_pairable = (
@@ -573,8 +586,12 @@ class MailSearchEngine:
             where.append("m.has_attachment = ?")
             params.append(1 if query.has_attachment else 0)
         if query.folder:
-            where.append("m.folder_path LIKE ?")
-            params.append(f"%{query.folder}%")
+            # 여러 folder: 값은 OR(합집합)로 묶는다 — GUI의 다중 폴더
+            # 체크박스 선택과 동일한 의미론(폴더는 메일 하나가 정확히
+            # 하나만 갖는 값이라, "여러 폴더 중 하나"가 "여러 폴더 경로를
+            # 동시에 포함"보다 훨씬 흔한 요구라고 판단했다).
+            where.append("(" + " OR ".join("m.folder_path LIKE ?" for _ in query.folder) + ")")
+            params.extend(f"%{f}%" for f in query.folder)
         if query.file_substr:
             where.append("m.file_path LIKE ?")
             params.append(f"%{query.file_substr}%")
@@ -671,10 +688,14 @@ class MailSearchEngine:
             entries.append(DiagnosisEntry(label, _fmt_count(n, probe_limit), n == 0))
 
         if query.folder:
+            folder_where = " OR ".join("folder_path LIKE ?" for _ in query.folder)
             n = self._probe_count_sql(
-                cur, "SELECT rowid FROM mails WHERE folder_path LIKE ? LIMIT ?", [f"%{query.folder}%", probe_limit]
+                cur,
+                f"SELECT rowid FROM mails WHERE ({folder_where}) LIMIT ?",
+                [*(f"%{f}%" for f in query.folder), probe_limit],
             )
-            entries.append(DiagnosisEntry(f"folder:{query.folder}", _fmt_count(n, probe_limit), n == 0))
+            label = "folder:" + " OR folder:".join(query.folder)
+            entries.append(DiagnosisEntry(label, _fmt_count(n, probe_limit), n == 0))
         if query.has_attachment is not None:
             n = self._probe_count_sql(
                 cur,

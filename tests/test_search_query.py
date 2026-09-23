@@ -60,9 +60,27 @@ def test_gmail_style_has_attachment_alias():
 
 
 def test_folder_field_and_alias():
-    assert parse_query("folder:보낸").folder == "보낸"
-    assert parse_query("in:보낸").folder == "보낸"
-    assert parse_query("폴더:보낸").folder == "보낸"
+    assert parse_query("folder:보낸").folder == ["보낸"]
+    assert parse_query("in:보낸").folder == ["보낸"]
+    assert parse_query("폴더:보낸").folder == ["보낸"]
+
+
+def test_folder_repeated_accumulates_instead_of_overwriting():
+    # 회귀 방지: 예전엔 두 번째 folder:가 첫 번째를 경고 없이 지워버렸다
+    # (실사용자가 "folder:A OR folder:B"를 치면 A가 사라진다고 보고).
+    q = parse_query("folder:법무 OR folder:영업")
+    assert q.folder == ["법무", "영업"]
+
+
+def test_folder_between_terms_does_not_leak_pending_or():
+    # folder:는 Term을 만들지 않으므로, "OR" 다음에 folder:가 오면
+    # pending_or가 리셋되지 않고 다음 무관한 텀까지 잘못 OR로 묶이는
+    # 버그가 있었다 — 회귀 방지.
+    q = parse_query("계약 OR folder:법무 회의록")
+    positives = [t.text for t in q.positive_terms()]
+    assert q.or_pairs() == []
+    assert positives == ["계약", "회의록"]
+    assert any("AND로 처리" in w for w in q.warnings)
 
 
 def test_negation_dash_prefix():
@@ -326,6 +344,15 @@ def test_folder_query_excludes_unrelated_folder(foldered_db, config):
     with MailSearchEngine(foldered_db, config) as se:
         result = se.search("folder:법무")
     assert "f4" not in {h.message_id for h in result.hits}
+
+
+def test_folder_or_query_returns_union_of_both_folders(foldered_db, config):
+    # 회귀 방지: 예전엔 "folder:A OR folder:B"를 치면 A가 조용히
+    # 사라지고 B만 남았다(실사용자 발견 버그) — 이제는 합집합이어야 한다.
+    with MailSearchEngine(foldered_db, config) as se:
+        result = se.search("folder:법무 OR folder:보낸편지함")
+    ids = {h.message_id for h in result.hits}
+    assert ids == {"f2", "f3", "f4"}  # f2/f3=법무 계열, f4=보낸편지함
 
 
 def test_list_folders_returns_sorted_distinct_paths(foldered_db, config):
