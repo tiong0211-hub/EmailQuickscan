@@ -282,7 +282,7 @@ Build Tools 없이 Python + pip만으로 빌드 머신을 준비할 수 있다.
 
 ### 이 세션에서 실제로 확인한 것
 
-- `python -m pytest tests/ -v` — **97개 전부 통과**
+- `python -m pytest tests/ -v` — **103개 전부 통과**
 - `ruff check src/ tests/` — 통과 (실질 버그를 잡는 규칙 위주 설정,
   근거는 `pyproject.toml` 주석 참조)
 - `mypy src/pst_engine/` — 통과
@@ -301,6 +301,18 @@ Build Tools 없이 Python + pip만으로 빌드 머신을 준비할 수 있다.
   의존성 없음, 모듈명이 `libpff-python`(비-Windows)과 동일한 `pypff` —
   MSVC 컴파일 없이 빌드 머신에서 `pip install`만으로 설치됨을 근거와
   함께 확인(실제 Windows 실행 자체는 미검증, 아래 참조)
+- `packaging/EmailQuickscan.spec`을 **Linux용 PyInstaller로 실제
+  빌드·실행**해 Analysis/EXE 구성 자체의 결함을 잡아냈다: 최상위
+  스크립트로 `src/pst_engine/cli.py`를 직접 지정하면(초기 버전의 실수)
+  상대 import 때문에 실행 즉시 `ImportError`로 죽는 것을 재현했고,
+  패키지 밖에 절대 import만 쓰는 `packaging/entrypoint.py`를 따로 둬
+  고쳤다. 고친 뒤 다시 빌드해 `--help`, `index --dry-run`, `search`
+  서브커맨드가 frozen 모드에서 실제로 동작하는 것과, 설정/DB 경로가
+  CWD가 아니라 exe 폴더 기준으로 정확히 앵커링되는 것도 확인했다.
+  산출물은 `dist` 바로 아래 단일 파일(`EmailQuickscan`, 하위 폴더 없음)
+  임도 이때 확인했다. **Windows 고유 동작**(콘솔/아이콘 처리,
+  `libpff-python-windows` 설치, `spawn` 멀티프로세싱)은 이 검증
+  범위 밖이며 여전히 미검증이다(아래 참조).
 
 ### 이 세션에서 확인하지 못한 것
 
@@ -308,10 +320,12 @@ Build Tools 없이 Python + pip만으로 빌드 머신을 준비할 수 있다.
   `readpst_parser.py`는 실제 라이브러리 API를 소스 레벨에서 검증했을
   뿐, "진짜 PST → RawMessage" 경로 자체는 미검증이다.
 - **Windows 환경 전반.** `spawn` 멀티프로세싱 실동작, `libpff-python-windows`
-  wheel이 실제 Windows에서 `pip install`로 깔끔히 설치되는지,
-  PyInstaller onefile exe 생성·실행, GUI의 실제 Windows 렌더링.
-  이 넷은 `packaging/BUILD.md`의 체크리스트로 남겨뒀다 — Windows 빌드
-  머신에서 사람이 확인해야 한다.
+  wheel이 실제 Windows에서 `pip install`로 깔끔히 설치되는지, Windows
+  전용 PyInstaller 빌드(콘솔/아이콘 등), GUI의 실제 Windows 렌더링.
+  (PyInstaller의 Analysis/EXE 구성 자체와 frozen 모드 진입점 동작은
+  Linux 빌드로 검증했다 — 위 항목 참조. Windows 바이너리 자체는 여전히
+  미검증이다.) 이 넷은 `packaging/BUILD.md`의 체크리스트로 남겨뒀다 —
+  Windows 빌드 머신에서 사람이 확인해야 한다.
 - **10GB급 실제 PST에서의 메모리 상한(1GB) 검증.** 스트리밍 설계(배치
   yield, 큐 백프레셔 `maxsize=workers*2`)는 코드 리뷰로는 타당하지만,
   대용량 실측은 하지 못했다.

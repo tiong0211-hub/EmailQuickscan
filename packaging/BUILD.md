@@ -81,8 +81,10 @@ readpst는 공식 Windows 바이너리가 없다(Cygwin/WSL/직접 빌드뿐 —
    ```
    또는 위 2~3번을 한 번에: `.\packaging\build_windows.ps1`
 
-   결과물: `packaging\dist\EmailQuickscan\EmailQuickscan.exe`
-   (또는 spec의 onefile 설정에 따라 단일 exe).
+   결과물: `packaging\dist\EmailQuickscan.exe` (단일 파일, 하위 폴더 없음).
+   spec이 `COLLECT()`를 쓰지 않고 `a.binaries`/`a.zipfiles`/`a.datas`를
+   `EXE()`에 직접 넘기는 onefile 구성이라 `dist` 바로 아래에 exe 하나만
+   생긴다 — 이 저장소에서 실제로 빌드해 확인한 결과다.
 
 4. **번들 검증 체크리스트** (배포 전 반드시 확인)
    - [ ] 패키지가 전혀 설치되지 않은 깨끗한 Windows PC에서 exe가 실행되는가

@@ -40,8 +40,10 @@ Visual Studio나 별도 컴파일러 설치가 필요 없다(자세한 이유는
 쓴다). 결과물:
 
 ```
-packaging\dist\EmailQuickscan\EmailQuickscan.exe
+packaging\dist\EmailQuickscan.exe
 ```
+
+(하위 폴더 없이 `dist` 바로 아래에 파일 하나만 생긴다 — onefile 빌드.)
 
 빌드 후 `packaging/BUILD.md`의 "번들 검증 체크리스트"를 **반드시** 통과
 시킨다(파서가 잡히는지, 실제 PST 1개로 끝까지 도는지, GUI가 뜨는지 등).
@@ -52,7 +54,7 @@ packaging\dist\EmailQuickscan\EmailQuickscan.exe
 직후 체크섬을 남겨 둔다.
 
 ```powershell
-Get-FileHash packaging\dist\EmailQuickscan\EmailQuickscan.exe -Algorithm SHA256
+Get-FileHash packaging\dist\EmailQuickscan.exe -Algorithm SHA256
 ```
 
 이 값을 반출 승인 문서 등에 같이 기록해 둔다.

@@ -43,5 +43,5 @@ Push-Location $RepoRoot
 pyinstaller packaging\EmailQuickscan.spec --distpath packaging\dist --workpath packaging\build --noconfirm
 Pop-Location
 
-Write-Host "== 완료: packaging\dist\EmailQuickscan\ ==" -ForegroundColor Green
+Write-Host "== 완료: packaging\dist\EmailQuickscan.exe ==" -ForegroundColor Green
 Write-Host "배포 전 BUILD.md의 '번들 검증 체크리스트'를 반드시 확인하세요." -ForegroundColor Yellow

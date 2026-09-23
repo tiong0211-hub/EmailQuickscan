@@ -3,14 +3,16 @@
 # 실행 방법(빌드 머신, packaging/BUILD.md 절차 4~5 완료 후):
 #   pyinstaller packaging/EmailQuickscan.spec
 #
-# 이 파일은 이 저장소 안에서 실제로 pyinstaller를 돌려 검증하지 못했다
-# (Windows 빌드 머신이 이 세션에 없음) — packaging/BUILD.md의 "검증
-# 체크리스트"를 빌드 머신에서 반드시 통과시켜야 한다.
+# 이 spec 자체는 이 세션에서 Linux용 PyInstaller로 실제로 빌드·실행해
+# 검증했다(Windows exe 자체는 만들 수 없지만, Analysis/EXE 구성이
+# 유효한지와 진입점이 실제로 도는지는 플랫폼 무관하게 확인 가능하다).
+# 그 과정에서 최상위 스크립트를 src/pst_engine/cli.py로 직접 지정하면
+# 상대 import 때문에 실행 즉시 죽는 버그를 발견해 packaging/entrypoint.py
+# 를 따로 두는 방식으로 고쳤다 — 아래 Analysis()의 스크립트 인자 참조.
+# Windows 고유 동작(콘솔 창, 아이콘 등)은 그래도 실제 Windows에서
+# 검증해야 한다 — packaging/BUILD.md의 "검증 체크리스트" 참조.
 
-import sys
 from pathlib import Path
-
-block_cipher = None
 
 ROOT = Path(SPECPATH).parent  # packaging/ 의 부모 = 저장소 루트
 SRC = ROOT / "src"
@@ -31,7 +33,7 @@ datas = [
 ]
 
 a = Analysis(
-    [str(SRC / "pst_engine" / "cli.py")],
+    [str(ROOT / "packaging" / "entrypoint.py")],
     pathex=[str(SRC)],
     binaries=binaries,
     datas=datas,
@@ -48,11 +50,10 @@ a = Analysis(
     hookspath=[],
     runtime_hooks=[],
     excludes=[],
-    cipher=block_cipher,
     noarchive=False,
 )
 
-pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+pyz = PYZ(a.pure, a.zipped_data)
 
 exe = EXE(
     pyz,
@@ -70,5 +71,9 @@ exe = EXE(
     runtime_tmpdir=None,
     console=True,  # CLI로도 쓰이므로 콘솔 유지. GUI 전용 exe가 필요하면
                    # 별도 spec에서 console=False + entry를 gui.run_gui로.
-    onefile=True,
+    # onefile 여부는 별도 플래그가 아니라 COLLECT()를 호출하지 않고
+    # a.binaries/a.zipfiles/a.datas를 EXE()에 바로 넘기는 것으로
+    # 결정된다(PyInstaller의 실제 동작 — 이 spec을 직접 빌드해 확인함).
+    # 결과물은 packaging/dist/ 바로 아래의 단일 파일
+    # EmailQuickscan(.exe)이며 하위 폴더가 생기지 않는다.
 )
