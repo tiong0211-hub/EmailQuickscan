@@ -284,3 +284,59 @@ def test_user_input_with_quotes_is_escaped_safely(populated_db, config):
         # FTS5 구문 오류를 유발할 수 있는 입력이어도 예외 없이 처리돼야 한다.
         result = se.search('계약" OR 1=1 --')
     assert isinstance(result.hits, list)
+
+
+# ---------------------------------------------------------------------------
+# folder: 부분일치 검색 + list_folders() (GUI 폴더 드롭다운의 근거)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def foldered_db(tmp_path, config):
+    db_path = tmp_path / "foldered.db"
+    eng = MailStorageEngine(db_path, config)
+    eng.upsert_batch([
+        _mk("f1", "받은편지함 최상위 메일", "본문1", folder="받은편지함"),
+        _mk("f2", "법무팀 계약서", "본문2", folder="받은편지함/법무"),
+        _mk("f3", "법무팀 2024", "본문3", folder="받은편지함/법무/2024"),
+        _mk("f4", "보낸 메일", "본문4", folder="보낸편지함"),
+    ])
+    eng.close()
+    return db_path
+
+
+def test_folder_query_matches_substring_across_subfolders(foldered_db, config):
+    # "법무"는 f2("받은편지함/법무")와 f3("받은편지함/법무/2024") 양쪽 경로에
+    # 부분 문자열로 포함되므로 둘 다 걸려야 한다(정확 일치/접두사 전용이
+    # 아니라 README에 문서화된 부분일치 동작).
+    with MailSearchEngine(foldered_db, config) as se:
+        result = se.search("folder:법무")
+    assert {h.message_id for h in result.hits} == {"f2", "f3"}
+
+
+def test_folder_query_prefix_also_matches_descendants(foldered_db, config):
+    # 상위 폴더 이름으로 검색해도(접두사) 그 아래 하위 폴더까지 부분
+    # 일치로 함께 걸린다 — f1(정확히 그 폴더)뿐 아니라 f2/f3도 포함.
+    with MailSearchEngine(foldered_db, config) as se:
+        result = se.search("folder:받은편지함")
+    assert {h.message_id for h in result.hits} == {"f1", "f2", "f3"}
+
+
+def test_folder_query_excludes_unrelated_folder(foldered_db, config):
+    with MailSearchEngine(foldered_db, config) as se:
+        result = se.search("folder:법무")
+    assert "f4" not in {h.message_id for h in result.hits}
+
+
+def test_list_folders_returns_sorted_distinct_paths(foldered_db, config):
+    with MailSearchEngine(foldered_db, config) as se:
+        folders = se.list_folders()
+    assert folders == sorted(folders)
+    assert set(folders) == {"받은편지함", "받은편지함/법무", "받은편지함/법무/2024", "보낸편지함"}
+
+
+def test_list_folders_empty_db_returns_empty_list(tmp_path, config):
+    db_path = tmp_path / "empty.db"
+    MailStorageEngine(db_path, config).close()
+    with MailSearchEngine(db_path, config) as se:
+        assert se.list_folders() == []

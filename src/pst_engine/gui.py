@@ -58,6 +58,7 @@ class EmailQuickscanApp:
         except Exception as exc:  # DB가 아직 없을 수 있다(첫 실행)
             self._search_engine = None
             self.status_var.set(f"DB를 열지 못했습니다: {exc}")
+        self._refresh_folder_list()
 
     def _build_menu(self) -> None:
         menubar = tk.Menu(self.root)
@@ -86,6 +87,15 @@ class EmailQuickscanApp:
         )
         sort_combo.pack(side=tk.LEFT, padx=4)
         sort_combo.bind("<<ComboboxSelected>>", self._on_query_changed)
+
+        # 폴더 필터: 검색창에 folder:/in:/폴더: 문법을 직접 타이핑하지
+        # 않아도, 인덱싱된 폴더 목록에서 골라 같은 부분일치 검색을 쓸 수
+        # 있게 한다(search.py의 기존 LIKE 로직을 그대로 재사용 — 새 필터
+        # 방식을 만들지 않는다). 값은 _refresh_folder_list()가 채운다.
+        self.folder_var = tk.StringVar(value="")
+        self.folder_combo = ttk.Combobox(top, textvariable=self.folder_var, values=[""], width=22, state="readonly")
+        self.folder_combo.pack(side=tk.LEFT, padx=4)
+        self.folder_combo.bind("<<ComboboxSelected>>", self._on_query_changed)
 
         self.whole_word_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(top, text="단어 단위", variable=self.whole_word_var, command=self._on_query_changed).pack(
@@ -136,6 +146,20 @@ class EmailQuickscanApp:
         self._current_hits: list[SearchHit] = []
         self._current_full_by_id: dict[str, dict] = {}
 
+    def _refresh_folder_list(self) -> None:
+        # 첫 항목은 빈 문자열("전체 폴더" = 필터 없음). DB가 아직 없거나
+        # 비어 있을 수 있으므로 조회 실패는 조용히 무시한다(드롭다운이
+        # 비어 있는 채로 남을 뿐 검색 자체는 영향받지 않는다).
+        folders = [""]
+        if self._search_engine is not None:
+            try:
+                folders += self._search_engine.list_folders()
+            except Exception:
+                pass
+        self.folder_combo["values"] = folders
+        if self.folder_var.get() not in folders:
+            self.folder_var.set("")
+
     def _on_query_changed(self, _event: object = None) -> None:
         if self._debounce_job is not None:
             self.root.after_cancel(self._debounce_job)
@@ -149,6 +173,13 @@ class EmailQuickscanApp:
             return
 
         query = self.query_var.get()
+        folder = self.folder_var.get()
+        if folder:
+            # cli.py의 _compose_query와 동일한 따옴표 규칙 — 검색창에
+            # 보이는 자유 텍스트 자체는 건드리지 않고, 폴더 필터만 검색
+            # 시점에 별도로 합성한다(기존 folder: 부분일치 로직 재사용).
+            quoted = f'"{folder}"' if " " in folder else folder
+            query = f"{query} folder:{quoted}".strip()
         try:
             result = self._search_engine.search(
                 query, limit=50, sort=self.sort_var.get(), whole_word=self.whole_word_var.get()

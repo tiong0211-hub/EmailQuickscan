@@ -460,6 +460,17 @@ class MailSearchEngine:
 
     # -- 공개 API ------------------------------------------------------
 
+    def list_folders(self) -> list[str]:
+        """인덱싱된 메일들의 고유 ``folder_path`` 목록(정렬됨, 빈 문자열 제외).
+
+        ``idx_folder`` 인덱스를 타는 단순 DISTINCT 스캔이라 100만 건
+        규모에서도 빠르다. GUI 폴더 드롭다운을 채우는 용도로만 쓰이며,
+        검색 경로 자체(부분일치 LIKE)에는 관여하지 않는다.
+        """
+        cur = self.conn.cursor()
+        cur.execute("SELECT DISTINCT folder_path FROM mails WHERE folder_path != '' ORDER BY folder_path")
+        return [row[0] for row in cur.fetchall()]
+
     def search(
         self,
         raw_query: str,
