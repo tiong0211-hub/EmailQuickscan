@@ -14,13 +14,42 @@ PyYAML이 번들되어 있으면 그것으로 파싱한다. 없으면(주로 이
 from __future__ import annotations
 
 import re
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from . import optional_deps
 
-_DEFAULT_YAML_PATH = Path(__file__).resolve().parent.parent.parent / "config" / "default.yaml"
+
+def _default_yaml_path() -> Path:
+    """``config/default.yaml``의 기본 위치를 정한다.
+
+    개발 환경(``python -m pst_engine.cli ...``)에서는 이 소스 파일 기준
+    상대 경로(저장소 루트의 ``config/``)를 쓴다.
+
+    PyInstaller로 묶은 실행 파일(``sys.frozen``)에서는 사정이 다르다 —
+    ``Path(__file__)``가 이 소스 파일이 원래 있던 위치가 아니라 실행 시
+    풀리는 임시 디렉터리를 가리키므로, 저장소 루트 기준 상대 경로 계산이
+    맞지 않는다. 그 대신:
+
+      1. **exe가 놓인 폴더**의 ``config/default.yaml``을 먼저 찾는다 —
+         관리자가 exe 옆에 이 파일을 두면 **재빌드 없이** 설정(워커 수,
+         배치 크기 등)을 바꿀 수 있게 하기 위함이다(사내망 배포 시
+         PC마다 사양이 달라 워커 수를 조정하고 싶을 수 있다).
+      2. 없으면 exe 안에 동봉된 기본값(``sys._MEIPASS``)을 쓴다.
+    """
+    if getattr(sys, "frozen", False):
+        exe_dir = Path(sys.executable).resolve().parent
+        external = exe_dir / "config" / "default.yaml"
+        if external.exists():
+            return external
+        bundled_root = Path(getattr(sys, "_MEIPASS", exe_dir))
+        return bundled_root / "config" / "default.yaml"
+    return Path(__file__).resolve().parent.parent.parent / "config" / "default.yaml"
+
+
+_DEFAULT_YAML_PATH = _default_yaml_path()
 
 
 # ---------------------------------------------------------------------------

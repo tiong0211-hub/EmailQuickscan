@@ -3,12 +3,13 @@
 동작하는지 검증한다.
 """
 
+import sys
 from pathlib import Path
 
 import pytest
 
 from pst_engine import config as config_mod
-from pst_engine.config import Config, load_config, parse_yaml_subset
+from pst_engine.config import Config, _default_yaml_path, load_config, parse_yaml_subset
 
 _REAL_YAML = (Path(__file__).resolve().parent.parent / "config" / "default.yaml").read_text(encoding="utf-8")
 
@@ -76,3 +77,55 @@ def test_load_config_without_pyyaml_falls_back(monkeypatch, tmp_path):
     cfg = load_config(p)
     assert cfg.batch_size == 7
     assert cfg.workers == 2
+
+
+def test_default_yaml_path_dev_mode_uses_repo_config(monkeypatch):
+    """개발 환경(sys.frozen 없음)에서는 소스 파일 기준 저장소 루트의
+    config/default.yaml을 가리켜야 한다."""
+    monkeypatch.delattr(sys, "frozen", raising=False)
+    path = _default_yaml_path()
+    assert path == Path(config_mod.__file__).resolve().parent.parent.parent / "config" / "default.yaml"
+    assert path.name == "default.yaml"
+
+
+def test_default_yaml_path_frozen_prefers_folder_next_to_exe(monkeypatch, tmp_path):
+    """PyInstaller onefile(sys.frozen=True)에서는 exe가 놓인 폴더의
+    config/default.yaml을 최우선으로 찾아야 한다 — 관리자가 재빌드 없이
+    exe 옆에 이 파일을 두면 설정을 바꿀 수 있게 하려는 것(실제 배포
+    시나리오에서 중요한 기능이다).
+    """
+    exe_dir = tmp_path / "dist"
+    exe_dir.mkdir()
+    fake_exe = exe_dir / "EmailQuickscan.exe"
+    fake_exe.write_bytes(b"")
+    external_cfg_dir = exe_dir / "config"
+    external_cfg_dir.mkdir()
+    (external_cfg_dir / "default.yaml").write_text("indexing:\n  batch_size: 999\n", encoding="utf-8")
+
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(fake_exe), raising=False)
+
+    path = _default_yaml_path()
+    assert path == external_cfg_dir / "default.yaml"
+
+    cfg = load_config(path)
+    assert cfg.batch_size == 999
+
+
+def test_default_yaml_path_frozen_falls_back_to_bundled_meipass(monkeypatch, tmp_path):
+    """exe 옆에 config/default.yaml이 없으면(일반적인 경우) 번들 안에
+    동봉된(_MEIPASS) 기본값으로 폴백해야 한다.
+    """
+    exe_dir = tmp_path / "dist"
+    exe_dir.mkdir()
+    fake_exe = exe_dir / "EmailQuickscan.exe"
+    fake_exe.write_bytes(b"")
+    meipass = tmp_path / "meipass_tmp"
+    meipass.mkdir()
+
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(fake_exe), raising=False)
+    monkeypatch.setattr(sys, "_MEIPASS", str(meipass), raising=False)
+
+    path = _default_yaml_path()
+    assert path == meipass / "config" / "default.yaml"
