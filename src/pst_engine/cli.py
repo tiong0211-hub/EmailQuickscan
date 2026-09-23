@@ -39,12 +39,19 @@ def _configure_logging(verbose: bool) -> None:
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="pst-search", description="사내망 Windows PST 메일 검색 엔진")
+    p = argparse.ArgumentParser(
+        prog="pst-search",
+        description="사내망 Windows PST 메일 검색 엔진 (서브커맨드 없이 실행하면 GUI가 뜹니다)",
+    )
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     p.add_argument("--config", default=None, help="설정 yaml 경로 (기본: config/default.yaml)")
     p.add_argument("--db", default=None, help="DB 경로 (기본: 설정의 paths.db)")
     p.add_argument("-v", "--verbose", action="store_true")
-    sub = p.add_subparsers(dest="command", required=True)
+    # required=False: 서브커맨드 없이 실행되면(더블클릭 등) main()에서 gui로
+    # 취급한다 — exe를 탐색기에서 더블클릭했을 때 "사용법만 찍고 즉시 종료
+    # (그래서 콘솔 창도 바로 닫힘)"이 아니라 GUI가 뜨는 게 일반 사용자에게
+    # 훨씬 자연스럽다. CLI로 서브커맨드를 명시하면 지금까지와 동일하게 동작한다.
+    sub = p.add_subparsers(dest="command", required=False)
 
     idx = sub.add_parser("index", help="PST/MSG 인덱싱")
     idx.add_argument("paths", nargs="+", help="PST/MSG 파일, 디렉터리, 글로브 (여러 개 가능)")
@@ -410,6 +417,8 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = build_arg_parser()
     args = parser.parse_args(argv)
+    if args.command is None:
+        args.command = "gui"
     _configure_logging(args.verbose)
 
     config = load_config(args.config)
