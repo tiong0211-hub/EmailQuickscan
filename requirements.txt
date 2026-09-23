@@ -4,11 +4,12 @@
 #
 #   pip install -r requirements.txt
 #
-# Windows 배포용 번들은 이 파일이 아니라 packaging/build_windows.ps1이
-# 빌드 머신에서 처리한다(pypff는 PyPI에 Windows 휠이 없어 별도 컴파일
-# 필요 — packaging/BUILD.md 참조).
+# Windows 배포용 번들도 이 파일 그대로 packaging/build_windows.ps1이
+# 빌드 머신에서 설치한다 — 컴파일러가 전혀 필요 없다(아래 win32 줄
+# 참조, packaging/BUILD.md에 근거 설명).
 
 libpff-python; sys_platform != "win32"
+libpff-python-windows; sys_platform == "win32"
 extract-msg
 PyYAML
 chardet

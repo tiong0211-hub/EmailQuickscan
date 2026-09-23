@@ -255,7 +255,7 @@ PST 등)는 `orchestrator.py`가 파일 단위로 잡아 FAILED 처리하고 다
 
 | 패키지 | 용도 | 없으면 |
 |---|---|---|
-| `libpff-python` | PST 1순위 파서 | readpst → .msg 순으로 폴백 |
+| `libpff-python`(비-Windows) / `libpff-python-windows`(Windows) | PST 1순위 파서 | readpst → .msg 순으로 폴백 |
 | `extract-msg` | `.msg` 파서 | 그 경로만 비활성 |
 | `PyYAML` | `config/default.yaml` 읽기 | 표준 라이브러리 서브셋 파서로 폴백(`config.parse_yaml_subset`) |
 | `chardet` | 인코딩 1차 추정 | 명세 고정 폴백 체인(`utf-8→cp949→euc-kr→latin-1`)만 사용 |
@@ -266,8 +266,14 @@ PST 등)는 `orchestrator.py`가 파일 단위로 잡아 FAILED 처리하고 다
 실행 파일에는 빌드 머신에서 전부 번들한다(`packaging/BUILD.md`) —
 런타임에 `pip install`을 시도하는 코드는 없다.
 
-`pypff`는 PyPI에 **Windows 휠이 없다**(macOS 휠 + 소스 tarball뿐,
-이 세션에서 직접 확인). 빌드 머신에서 MSVC로 컴파일해야 한다.
+`libpff-python`(공식)은 PyPI에 **Windows 휠이 없다**(macOS 휠 + 소스
+tarball뿐, 이 세션에서 직접 확인). 대신 같은 libpff를 Windows용으로
+미리 컴파일해 올린 제3자 wheel `libpff-python-windows`를 쓴다 — 실제로
+다운로드해 내부를 열어 보니 외부 DLL 의존성 없는 단일 `.pyd`이고,
+설치되는 모듈명도 `pypff`로 동일해 **컴파일도 코드 변경도 필요 없다**.
+비공식 배포판을 쓰는 신뢰 판단 근거(버전 일치, 소스 대조 가능,
+버전 고정)는 `packaging/BUILD.md`에 기록했다. 이 덕분에 Visual Studio
+Build Tools 없이 Python + pip만으로 빌드 머신을 준비할 수 있다.
 
 ---
 
@@ -275,7 +281,7 @@ PST 등)는 `orchestrator.py`가 파일 단위로 잡아 FAILED 처리하고 다
 
 ### 이 세션에서 실제로 확인한 것
 
-- `python -m pytest tests/ -v` — **95개 전부 통과**
+- `python -m pytest tests/ -v` — **97개 전부 통과**
 - `ruff check src/ tests/` — 통과 (실질 버그를 잡는 규칙 위주 설정,
   근거는 `pyproject.toml` 주석 참조)
 - `mypy src/pst_engine/` — 통과
@@ -289,14 +295,20 @@ PST 등)는 `orchestrator.py`가 파일 단위로 잡아 FAILED 처리하고 다
 - `pypff`(apt `python3-pypff`)와 `readpst`(apt `pst-utils`)를 실제
   설치해 API를 확인(단, 실제 PST 파일을 구하지 못해 "PST 원본 →
   RawMessage" 경로 자체는 end-to-end로 돌려보지 못함 — 아래 참조)
+- Windows용 사전 빌드 wheel `libpff-python-windows`를 실제로 다운로드해
+  내부를 열어 확인: `pypff.cp3xx-win_amd64.pyd` 단일 파일, 외부 DLL
+  의존성 없음, 모듈명이 `libpff-python`(비-Windows)과 동일한 `pypff` —
+  MSVC 컴파일 없이 빌드 머신에서 `pip install`만으로 설치됨을 근거와
+  함께 확인(실제 Windows 실행 자체는 미검증, 아래 참조)
 
 ### 이 세션에서 확인하지 못한 것
 
 - **실제 PST 파일로 인덱싱.** 공개 샘플 PST를 구하지 못해 `pypff_parser.py`/
   `readpst_parser.py`는 실제 라이브러리 API를 소스 레벨에서 검증했을
   뿐, "진짜 PST → RawMessage" 경로 자체는 미검증이다.
-- **Windows 환경 전반.** `spawn` 멀티프로세싱 실동작, `libpff`의 MSVC
-  빌드, PyInstaller onefile exe 생성·실행, GUI의 실제 Windows 렌더링.
+- **Windows 환경 전반.** `spawn` 멀티프로세싱 실동작, `libpff-python-windows`
+  wheel이 실제 Windows에서 `pip install`로 깔끔히 설치되는지,
+  PyInstaller onefile exe 생성·실행, GUI의 실제 Windows 렌더링.
   이 넷은 `packaging/BUILD.md`의 체크리스트로 남겨뒀다 — Windows 빌드
   머신에서 사람이 확인해야 한다.
 - **10GB급 실제 PST에서의 메모리 상한(1GB) 검증.** 스트리밍 설계(배치

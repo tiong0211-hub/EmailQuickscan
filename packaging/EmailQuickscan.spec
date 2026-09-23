@@ -15,9 +15,11 @@ block_cipher = None
 ROOT = Path(SPECPATH).parent  # packaging/ 의 부모 = 저장소 루트
 SRC = ROOT / "src"
 
-# 빌드 머신에 readpst.exe를 확보해 뒀다면 여기 두고 동봉한다
-# (packaging/BUILD.md 절차 3). 없으면 빈 리스트로 두고, resolver.py가
-# readpst 경로를 자동으로 건너뛴다.
+# readpst는 표준 빌드 절차에서 더 이상 준비하지 않는다 — pypff가
+# libpff-python-windows(사전 빌드 wheel, 컴파일 불필요)로 1순위 파서를
+# 확보하므로 readpst 없이도 PST를 연다(BUILD.md 참조). 그래도 나중에
+# 사용자가 readpst.exe를 직접 구해 packaging/bundled_bin/에 넣으면 이
+# 코드가 그대로 집어 동봉한다 — 선택적 2차 안전망으로만 남겨 둔다.
 bundled_bin = ROOT / "packaging" / "bundled_bin"
 binaries = []
 readpst_exe = bundled_bin / "readpst.exe"

@@ -14,7 +14,12 @@ readme = "README.md"
 # packaging/build_windows.ps1이 실행 파일에 번들한다.
 [project.optional-dependencies]
 accel = [
-    "libpff-python; sys_platform != 'win32'",  # Windows는 빌드 머신에서 별도 컴파일(BUILD.md)
+    "libpff-python; sys_platform != 'win32'",
+    # Windows는 libpff-python이 아니라 이 사전 빌드 wheel을 쓴다(같은
+    # libpff 20231205을 Windows용으로 미리 컴파일해 올린 win_amd64 wheel,
+    # cp310~cp313 지원). MSVC 컴파일이 전혀 필요 없고, 설치되는 모듈명도
+    # 똑같이 `pypff`라 코드는 그대로다 — packaging/BUILD.md 참조.
+    "libpff-python-windows; sys_platform == 'win32'",
     "extract-msg",
     "PyYAML",
     "chardet",
