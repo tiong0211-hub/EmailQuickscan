@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import queue
+import sqlite3
 import threading
 import tkinter as tk
 from collections.abc import Callable
@@ -60,10 +61,33 @@ class EmailQuickscanApp:
             self.status_var.set(f"DB를 열지 못했습니다: {exc}")
         self._refresh_folder_list()
 
+    def _open_db_dialog(self) -> None:
+        # indexing_log.json/errors.jsonl이 DB와 같은 폴더에 있다고
+        # 가정한다 — 기본 배포 구조(data/mail_index.db + 같은 data/
+        # 폴더의 나머지 둘)가 항상 이 관계이고, USAGE.md도 이 셋을
+        # 통째로 옮기라고 안내하고 있어 그 가정과 일치한다.
+        path = filedialog.askopenfilename(
+            title="색인 DB 열기", filetypes=[("SQLite DB", "*.db"), ("모든 파일", "*.*")]
+        )
+        if not path:
+            return
+        self.db_path = path
+        db_dir = Path(path).parent
+        self.state_path = str(db_dir / "indexing_log.json")
+        self.errors_path = str(db_dir / "errors.jsonl")
+        self._current_hits.clear()
+        self._current_full_by_id.clear()
+        self._clear_preview()
+        self._open_engine()
+        self._run_search()
+        self.status_var.set(f"DB 열림: {path}")
+
     def _build_menu(self) -> None:
         menubar = tk.Menu(self.root)
         file_menu = tk.Menu(menubar, tearoff=0)
         file_menu.add_command(label="인덱싱...", command=self._open_index_dialog)
+        file_menu.add_command(label="DB 열기...", command=self._open_db_dialog)
+        file_menu.add_command(label="로그 보기...", command=self._open_log_viewer)
         file_menu.add_separator()
         file_menu.add_command(label="종료", command=self.root.quit)
         menubar.add_cascade(label="파일", menu=file_menu)
@@ -280,6 +304,9 @@ class EmailQuickscanApp:
             + (f"참조: {full['cc_addr']}\n" if full["cc_addr"] else "")
             + f"날짜: {dt}\n"
             f"폴더: {full['folder_path']}"
+            # cmd_show(cli.py)와 동일하게, 인코딩 폴백/실패로 원문이
+            # 온전하지 않을 수 있음을 미리보기에서도 알려준다.
+            + (f"\n[주의] 인코딩 상태: {full['decode_status']}" if full["decode_status"] != "ok" else "")
         )
         self.preview_meta.config(state=tk.NORMAL)
         self.preview_meta.delete("1.0", tk.END)
@@ -370,20 +397,53 @@ class EmailQuickscanApp:
         if not self._current_hits:
             messagebox.showinfo("내보내기", "내보낼 결과가 없습니다.")
             return
-        out_path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV", "*.csv")])
-        if not out_path:
-            return
         if self._search_engine is None:
             messagebox.showerror("내보내기 실패", "DB 연결이 없습니다.")
             return
-        from .storage import MailStorageEngine
+        fmt = self._ask_export_format()
+        if fmt == "csv":
+            self._export_csv()
+        elif fmt == "eml":
+            self._export_eml()
 
+    def _ask_export_format(self) -> str | None:
+        # CSV/EML 딱 두 선택지뿐이라, 별도 라이브러리 없이 표준 위젯만
+        # (버튼 두 개짜리 모달 Toplevel) 으로 충분하다.
+        dlg = tk.Toplevel(self.root)
+        dlg.title("내보내기 형식")
+        dlg.resizable(False, False)
+        dlg.transient(self.root)
+        dlg.grab_set()
+        result: list[str | None] = [None]
+
+        ttk.Label(dlg, text="내보낼 형식을 선택하세요.").pack(padx=16, pady=(16, 8))
+        btns = ttk.Frame(dlg)
+        btns.pack(padx=16, pady=(0, 16))
+
+        def choose(fmt: str) -> None:
+            result[0] = fmt
+            dlg.destroy()
+
+        ttk.Button(btns, text="CSV (표, 엑셀용)", command=lambda: choose("csv")).pack(side=tk.LEFT, padx=4)
+        ttk.Button(btns, text="EML (메일 원본 파일들)", command=lambda: choose("eml")).pack(side=tk.LEFT, padx=4)
+        dlg.wait_window()
+        return result[0]
+
+    def _fetch_current_hit_rows(self) -> list[sqlite3.Row]:
+        assert self._search_engine is not None
         cur = self._search_engine.conn.cursor()
         ids = [h.message_id for h in self._current_hits]
         placeholders = ",".join("?" for _ in ids)
         cur.execute(f"SELECT * FROM mails WHERE message_id IN ({placeholders})", ids)
-        rows = cur.fetchall()
+        return cur.fetchall()
 
+    def _export_csv(self) -> None:
+        out_path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV", "*.csv")])
+        if not out_path:
+            return
+        from .storage import MailStorageEngine
+
+        rows = self._fetch_current_hit_rows()
         exporter = object.__new__(MailStorageEngine)
         exporter.config = self.config  # type: ignore[attr-defined]
         columns = [
@@ -392,6 +452,18 @@ class EmailQuickscanApp:
         ]
         count = MailStorageEngine.export_csv(exporter, rows, out_path, columns)
         messagebox.showinfo("내보내기 완료", f"{count}행을 저장했습니다:\n{out_path}")
+
+    def _export_eml(self) -> None:
+        out_dir = filedialog.askdirectory(title="EML 저장 폴더 선택")
+        if not out_dir:
+            return
+        from .storage import MailStorageEngine
+
+        rows = self._fetch_current_hit_rows()
+        exporter = object.__new__(MailStorageEngine)
+        exporter.config = self.config  # type: ignore[attr-defined]
+        count = MailStorageEngine.export_eml(exporter, rows, out_dir)
+        messagebox.showinfo("내보내기 완료", f"{count}개 메일을 저장했습니다(첨부 제외, 본문만):\n{out_dir}")
 
     # -- 인덱싱 다이얼로그 --------------------------------------------------
 
@@ -403,6 +475,9 @@ class EmailQuickscanApp:
             return
         dlg = IndexProgressDialog(self.root, self, list(paths))
         dlg.start()
+
+    def _open_log_viewer(self) -> None:
+        LogViewerDialog(self.root, self.state_path, self.errors_path)
 
     def start_index_thread(self, paths: list[str], on_event) -> None:
         self._index_stop.clear()
@@ -508,6 +583,144 @@ class IndexProgressDialog(tk.Toplevel):
     def _on_stop(self) -> None:
         self.app.stop_index()
         self.status_var.set("중단 요청됨... 현재 배치까지 저장 후 종료합니다")
+
+
+class LogViewerDialog(tk.Toplevel):
+    """인덱싱 이력(``state.py``)과 오류 로그(``errors.jsonl``)를 GUI
+    안에서 바로 본다 — 터미널이나 텍스트 편집기로 파일을 직접 열 필요를
+    없애려는 목적. ``StateManager``는 워커 프로세스가 아니라 여기
+    메인/GUI 프로세스에서만 읽으므로 역할 경계("워커에서 호출 ❌")를
+    위배하지 않는다.
+    """
+
+    _MAX_ERROR_LINES = 500
+
+    def __init__(self, parent: tk.Tk, state_path: str, errors_path: str) -> None:
+        super().__init__(parent)
+        self.title("로그 보기")
+        self.geometry("800x480")
+        self.state_path = state_path
+        self.errors_path = errors_path
+
+        notebook = ttk.Notebook(self)
+        notebook.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+
+        history_frame = ttk.Frame(notebook)
+        self._history_tree = self._build_history_tab(history_frame)
+        notebook.add(history_frame, text="인덱싱 이력")
+
+        errors_frame = ttk.Frame(notebook)
+        self._error_tree, self._error_note = self._build_errors_tab(errors_frame)
+        notebook.add(errors_frame, text="오류 로그")
+
+        self._reload()
+
+    def _build_history_tab(self, parent: ttk.Frame) -> ttk.Treeview:
+        columns = ("status", "mails", "updated", "error")
+        tree = ttk.Treeview(parent, columns=columns, show="tree headings")
+        tree.heading("#0", text="파일")
+        tree.heading("status", text="상태")
+        tree.heading("mails", text="처리된 메일 수")
+        tree.heading("updated", text="마지막 갱신")
+        tree.heading("error", text="오류")
+        tree.column("#0", width=280, anchor=tk.W)
+        tree.column("status", width=90, anchor=tk.W)
+        tree.column("mails", width=110, anchor=tk.CENTER)
+        tree.column("updated", width=150, anchor=tk.W)
+        tree.column("error", width=150, anchor=tk.W)
+        tree.pack(fill=tk.BOTH, expand=True, padx=4, pady=(4, 0))
+        ttk.Button(parent, text="새로고침", command=self._reload).pack(anchor=tk.E, padx=4, pady=4)
+        return tree
+
+    def _build_errors_tab(self, parent: ttk.Frame) -> tuple[ttk.Treeview, tk.StringVar]:
+        columns = ("ts", "file", "folder", "type", "message")
+        tree = ttk.Treeview(parent, columns=columns, show="headings")
+        tree.heading("ts", text="시각")
+        tree.heading("file", text="파일")
+        tree.heading("folder", text="폴더")
+        tree.heading("type", text="오류유형")
+        tree.heading("message", text="메시지")
+        tree.column("ts", width=130, anchor=tk.W)
+        tree.column("file", width=180, anchor=tk.W)
+        tree.column("folder", width=140, anchor=tk.W)
+        tree.column("type", width=110, anchor=tk.W)
+        tree.column("message", width=220, anchor=tk.W)
+        tree.pack(fill=tk.BOTH, expand=True, padx=4, pady=(4, 0))
+
+        note_var = tk.StringVar(value="")
+        bottom = ttk.Frame(parent)
+        bottom.pack(fill=tk.X, padx=4, pady=4)
+        ttk.Label(bottom, textvariable=note_var).pack(side=tk.LEFT)
+        ttk.Button(bottom, text="새로고침", command=self._reload).pack(side=tk.RIGHT)
+        return tree, note_var
+
+    def _reload(self) -> None:
+        self._reload_history()
+        self._reload_errors()
+
+    def _reload_history(self) -> None:
+        for item in self._history_tree.get_children():
+            self._history_tree.delete(item)
+        from .state import StateManager
+
+        try:
+            states = StateManager(self.state_path).all_states()
+        except Exception:
+            return
+        for path, st in sorted(states.items()):
+            updated = (
+                datetime.fromtimestamp(st.updated_at, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+                if st.updated_at
+                else ""
+            )
+            self._history_tree.insert(
+                "", tk.END, text=path, values=(st.status, st.mails_written, updated, st.error or "")
+            )
+
+    def _reload_errors(self) -> None:
+        for item in self._error_tree.get_children():
+            self._error_tree.delete(item)
+        import json
+
+        path = Path(self.errors_path)
+        if not path.exists():
+            self._error_note.set("아직 기록된 오류가 없습니다.")
+            return
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            self._error_note.set("오류 로그 파일을 읽지 못했습니다.")
+            return
+
+        # 아주 큰 로그에서도 GUI가 멎지 않도록 최근 N줄만 그린다 — 오류는
+        # 예외 상황이라 전체 메일 수보다 훨씬 적은 게 정상이지만, 방어적으로
+        # 상한을 둔다.
+        shown = lines[-self._MAX_ERROR_LINES :]
+        for line in shown:
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            ts = entry.get("ts")
+            ts_display = (
+                datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S") if ts else ""
+            )
+            self._error_tree.insert(
+                "",
+                tk.END,
+                values=(
+                    ts_display,
+                    entry.get("file_path", ""),
+                    entry.get("folder_path", ""),
+                    entry.get("error_type", ""),
+                    entry.get("error", ""),
+                ),
+            )
+        total = len(lines)
+        if total > self._MAX_ERROR_LINES:
+            self._error_note.set(f"최근 {self._MAX_ERROR_LINES}건만 표시(전체 {total}건).")
+        else:
+            self._error_note.set(f"전체 {total}건.")
 
 
 def run_gui(config: Config, db_path: str, state_path: str, errors_path: str) -> None:
